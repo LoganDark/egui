@@ -41,7 +41,7 @@ impl From<accesskit_winit::ActionRequestEvent> for UserEvent {
 pub use epi::NativeOptions;
 
 #[derive(Debug)]
-enum EventResult {
+pub enum EventResult {
     Wait,
 
     /// Causes a synchronous repaint inside the event handler. This should only
@@ -62,7 +62,7 @@ enum EventResult {
     Exit,
 }
 
-trait WinitApp {
+pub trait WinitApp {
     /// The current frame number, as reported by egui.
     fn frame_nr(&self) -> u64;
 
@@ -330,7 +330,7 @@ fn run_and_exit(event_loop: EventLoop<UserEvent>, mut winit_app: impl WinitApp +
 // ----------------------------------------------------------------------------
 /// Run an egui app
 #[cfg(feature = "glow")]
-mod glow_integration {
+pub mod glow_integration {
     use std::sync::Arc;
 
     use egui::NumExt as _;
@@ -617,7 +617,7 @@ mod glow_integration {
         }
     }
 
-    struct GlowWinitApp {
+    pub struct GlowWinitApp {
         repaint_proxy: Arc<egui::mutex::Mutex<EventLoopProxy<UserEvent>>>,
         app_name: String,
         native_options: epi::NativeOptions,
@@ -637,8 +637,17 @@ mod glow_integration {
             native_options: epi::NativeOptions,
             app_creator: epi::AppCreator,
         ) -> Self {
+            Self::new_proxy(Arc::new(egui::mutex::Mutex::new(event_loop.create_proxy())), app_name, native_options, app_creator)
+        }
+
+        pub fn new_proxy(
+            repaint_proxy: Arc<egui::mutex::Mutex<EventLoopProxy<UserEvent>>>,
+            app_name: &str,
+            native_options: epi::NativeOptions,
+            app_creator: epi::AppCreator,
+        ) -> Self {
             Self {
-                repaint_proxy: Arc::new(egui::mutex::Mutex::new(event_loop.create_proxy())),
+                repaint_proxy,
                 app_name: app_name.to_owned(),
                 native_options,
                 running: None,
@@ -1055,7 +1064,7 @@ pub use glow_integration::run_glow;
 // ----------------------------------------------------------------------------
 
 #[cfg(feature = "wgpu")]
-mod wgpu_integration {
+pub mod wgpu_integration {
     use std::sync::Arc;
 
     use super::*;
@@ -1069,7 +1078,7 @@ mod wgpu_integration {
         app: Box<dyn epi::App>,
     }
 
-    struct WgpuWinitApp {
+    pub struct WgpuWinitApp {
         repaint_proxy: Arc<std::sync::Mutex<EventLoopProxy<UserEvent>>>,
         app_name: String,
         native_options: epi::NativeOptions,
@@ -1089,6 +1098,15 @@ mod wgpu_integration {
             native_options: epi::NativeOptions,
             app_creator: epi::AppCreator,
         ) -> Self {
+            Self::new_proxy(Arc::new(std::sync::Mutex::new(event_loop.create_proxy())), app_name, native_options, app_creator)
+        }
+
+        pub fn new_proxy(
+            repaint_proxy: Arc<std::sync::Mutex<EventLoopProxy<UserEvent>>>,
+            app_name: &str,
+            native_options: epi::NativeOptions,
+            app_creator: epi::AppCreator,
+        ) -> Self {
             #[cfg(feature = "__screenshot")]
             assert!(
                 std::env::var("EFRAME_SCREENSHOT_TO").is_err(),
@@ -1096,7 +1114,7 @@ mod wgpu_integration {
             );
 
             Self {
-                repaint_proxy: Arc::new(std::sync::Mutex::new(event_loop.create_proxy())),
+                repaint_proxy,
                 app_name: app_name.to_owned(),
                 native_options,
                 running: None,
