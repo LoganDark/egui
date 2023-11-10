@@ -7,6 +7,7 @@ pub(crate) struct DatePickerButtonState {
     pub picker_visible: bool,
 }
 
+/// Shows a date, and will open a date picker popup when clicked.
 pub struct DatePickerButton<'a> {
     selection: &'a mut NaiveDate,
     id_source: Option<&'a str>,
@@ -61,7 +62,7 @@ impl<'a> DatePickerButton<'a> {
         self
     }
 
-    /// Show the calender icon on the button. (Default: true)
+    /// Show the calendar icon on the button. (Default: true)
     pub fn show_icon(mut self, show_icon: bool) -> Self {
         self.show_icon = show_icon;
         self
@@ -116,6 +117,7 @@ impl<'a> Widget for DatePickerButton<'a> {
             } = Area::new(ui.make_persistent_id(self.id_source))
                 .order(Order::Foreground)
                 .fixed_pos(pos)
+                .constrain_to(ui.ctx().screen_rect())
                 .show(ui.ctx(), |ui| {
                     let frame = Frame::popup(ui.style());
                     frame

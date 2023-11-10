@@ -6,6 +6,7 @@ members = [
     "crates/egui_demo_lib",
     "crates/egui_extras",
     "crates/egui_glow",
+    "crates/egui_plot",
     "crates/egui-wgpu",
     "crates/egui-winit",
     "crates/egui",
@@ -36,3 +37,4 @@ opt-level = 2
 
 [workspace.dependencies]
 thiserror = "1.0.37"
+wgpu = "0.17.0"

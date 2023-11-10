@@ -12,8 +12,7 @@ export RUSTFLAGS=--cfg=web_sys_unstable_apis
 
 CRATE_NAME="egui_demo_app"
 
- # NOTE: persistence use up about 400kB (10%) of the WASM!
-FEATURES="http,persistence,web_screen_reader"
+FEATURES="web_app"
 
 OPEN=false
 OPTIMIZE=false
@@ -55,7 +54,8 @@ while test $# -gt 0; do
       ;;
 
     *)
-      break
+      echo "Unknown option: $1"
+      exit 1
       ;;
   esac
 done

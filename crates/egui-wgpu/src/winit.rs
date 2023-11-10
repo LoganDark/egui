@@ -7,6 +7,7 @@ struct SurfaceState {
     alpha_mode: wgpu::CompositeAlphaMode,
     width: u32,
     height: u32,
+    supports_screenshot: bool,
 }
 
 /// A texture and a buffer for reading the rendered frame back to the cpu.
@@ -136,10 +137,16 @@ impl Painter {
         render_state: &RenderState,
         present_mode: wgpu::PresentMode,
     ) {
+        crate::profile_function!();
+        let usage = if surface_state.supports_screenshot {
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST
+        } else {
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+        };
         surface_state.surface.configure(
             &render_state.device,
             &wgpu::SurfaceConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
+                usage,
                 format: render_state.target_format,
                 width: surface_state.width,
                 height: surface_state.height,
@@ -169,18 +176,13 @@ impl Painter {
     /// [`set_window`](Self::set_window) may be called with `Some(window)` as soon as you have a
     /// valid [`winit::window::Window`].
     ///
-    /// # Safety
-    ///
-    /// The raw Window handle associated with the given `window` must be a valid object to create a
-    /// surface upon and must remain valid for the lifetime of the created surface. (The surface may
-    /// be cleared by passing `None`).
-    ///
     /// # Errors
     /// If the provided wgpu configuration does not match an available device.
     pub async fn set_window(
         &mut self,
         window: Option<&winit::window::Window>,
     ) -> Result<(), crate::WgpuError> {
+        crate::profile_function!();
         match window {
             Some(window) => {
                 let surface = unsafe { self.instance.create_surface(&window)? };
@@ -218,12 +220,16 @@ impl Painter {
                     wgpu::CompositeAlphaMode::Auto
                 };
 
+                let supports_screenshot =
+                    !matches!(render_state.adapter.get_info().backend, wgpu::Backend::Gl);
+
                 let size = window.inner_size();
                 self.surface_state = Some(SurfaceState {
                     surface,
                     width: size.width,
                     height: size.height,
                     alpha_mode,
+                    supports_screenshot,
                 });
                 self.resize_and_generate_depth_texture_view_and_msaa_view(size.width, size.height);
             }
@@ -250,6 +256,7 @@ impl Painter {
         width_in_pixels: u32,
         height_in_pixels: u32,
     ) {
+        crate::profile_function!();
         let render_state = self.render_state.as_ref().unwrap();
         let surface_state = self.surface_state.as_mut().unwrap();
 
@@ -269,7 +276,7 @@ impl Painter {
                         depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
-                    sample_count: 1,
+                    sample_count: self.msaa_samples,
                     dimension: wgpu::TextureDimension::D2,
                     format: depth_format,
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT
@@ -305,6 +312,7 @@ impl Painter {
     }
 
     pub fn on_window_resized(&mut self, width_in_pixels: u32, height_in_pixels: u32) {
+        crate::profile_function!();
         if self.surface_state.is_some() {
             self.resize_and_generate_depth_texture_view_and_msaa_view(
                 width_in_pixels,
@@ -485,6 +493,15 @@ impl Painter {
             )
         };
 
+        let capture = match (capture, surface_state.supports_screenshot) {
+            (false, _) => false,
+            (true, true) => true,
+            (true, false) => {
+                log::error!("The active render surface doesn't support taking screenshots.");
+                false
+            }
+        };
+
         {
             let renderer = render_state.renderer.read();
             let frame_view = if capture {
@@ -566,7 +583,7 @@ impl Painter {
         } else {
             None
         };
-        // Redraw egui
+
         {
             crate::profile_scope!("present");
             output_frame.present();

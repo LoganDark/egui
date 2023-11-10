@@ -87,8 +87,7 @@ impl WebPainterWgpu {
         } else {
             // Workaround for https://github.com/gfx-rs/wgpu/issues/3710:
             // Don't use `create_surface_from_canvas`, but `create_surface` instead!
-            let raw_window =
-                EguiWebWindow(egui::util::hash(&format!("egui on wgpu {canvas_id}")) as u32);
+            let raw_window = EguiWebWindow(egui::util::hash(("egui on wgpu", canvas_id)) as u32);
             canvas.set_attribute("data-raw-handle", &raw_window.0.to_string());
 
             #[allow(unsafe_code)]
@@ -149,9 +148,7 @@ impl WebPainter for WebPainterWgpu {
     ) -> Result<(), JsValue> {
         let size_in_pixels = [self.canvas.width(), self.canvas.height()];
 
-        let render_state = if let Some(render_state) = &self.render_state {
-            render_state
-        } else {
+        let Some(render_state) = &self.render_state else {
             return Err(JsValue::from_str(
                 "Can't paint, wgpu renderer was already disposed",
             ));

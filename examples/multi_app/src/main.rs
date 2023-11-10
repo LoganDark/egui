@@ -2,18 +2,16 @@ use std::cell::{OnceCell, Ref, RefCell, RefMut};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use eframe::{App, Frame, NativeOptions, Storage, UserEvent};
-use eframe::emath::Vec2;
-use eframe::native::run::EventResult;
-use eframe::native::run::wgpu_integration::WgpuWinitApp;
-use eframe::egui::{CentralPanel, Context, Visuals};
 use winit::event::Event;
 use winit::event_loop::{ControlFlow, EventLoopBuilder};
 use winit::platform::run_return::EventLoopExtRunReturn;
 
+use eframe::{App, Frame, NativeOptions, Storage, UserEvent};
+use eframe::egui::{CentralPanel, Context, Visuals};
+use eframe::native::run::EventResult;
+use eframe::native::run::wgpu_integration::{Mutex, WgpuWinitApp};
 use multi_app::WinitAppRunner;
 
 enum Operation { Destroy, NewWindow }
@@ -57,9 +55,7 @@ impl<P: AppProxyAccessor> App for AppProxy<P> {
 	fn on_close_event(&mut self) -> bool { self.0.borrow_mut().on_close_event() }
 	fn on_exit(&mut self) { self.0.borrow_mut().on_exit() }
 	fn auto_save_interval(&self) -> Duration { self.0.borrow().auto_save_interval() }
-	fn max_size_points(&self) -> Vec2 { self.0.borrow().max_size_points() }
 	fn clear_color(&self, visuals: &Visuals) -> [f32; 4] { self.0.borrow().clear_color(visuals) }
-	fn persist_native_window(&self) -> bool { self.0.borrow().persist_native_window() }
 	fn persist_egui_memory(&self) -> bool { self.0.borrow().persist_egui_memory() }
 	fn warm_up_enabled(&self) -> bool { self.0.borrow().warm_up_enabled() }
 	fn post_rendering(&mut self, window_size_px: [u32; 2], frame: &Frame) { self.0.borrow_mut().post_rendering(window_size_px, frame) }

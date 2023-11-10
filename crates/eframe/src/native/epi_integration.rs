@@ -3,6 +3,8 @@ use winit::event_loop::EventLoopWindowTarget;
 #[cfg(target_os = "macos")]
 use winit::platform::macos::WindowBuilderExtMacOS as _;
 
+use raw_window_handle::{HasRawDisplayHandle as _, HasRawWindowHandle as _};
+
 #[cfg(feature = "accesskit")]
 use egui::accesskit;
 use egui::NumExt as _;
@@ -73,7 +75,7 @@ pub fn read_window_info(
 pub fn window_builder<E>(
     event_loop: &EventLoopWindowTarget<E>,
     title: &str,
-    native_options: &epi::NativeOptions,
+    native_options: &mut epi::NativeOptions,
     window_settings: Option<WindowSettings>,
 ) -> winit::window::WindowBuilder {
     let epi::NativeOptions {
@@ -119,9 +121,12 @@ pub fn window_builder<E>(
     }
 
     #[cfg(all(feature = "wayland", target_os = "linux"))]
-    if let Some(app_id) = &native_options.app_id {
+    {
         use winit::platform::wayland::WindowBuilderExtWayland as _;
-        window_builder = window_builder.with_name(app_id, "");
+        match &native_options.app_id {
+            Some(app_id) => window_builder = window_builder.with_name(app_id, ""),
+            None => window_builder = window_builder.with_name(title, ""),
+        }
     }
 
     if let Some(min_size) = *min_window_size {
@@ -133,12 +138,16 @@ pub fn window_builder<E>(
 
     window_builder = window_builder_drag_and_drop(window_builder, *drag_and_drop_support);
 
+    // Always use the default window size / position on iOS. Trying to restore the previous position
+    // causes the window to be shown too small.
+    #[cfg(not(target_os = "ios"))]
     let inner_size_points = if let Some(mut window_settings) = window_settings {
         // Restore pos/size from previous session
-        window_settings.clamp_to_sane_values(largest_monitor_point_size(event_loop));
-        #[cfg(windows)]
-        window_settings.clamp_window_to_sane_position(event_loop);
-        window_builder = window_settings.initialize_window(window_builder);
+
+        window_settings.clamp_size_to_sane_values(largest_monitor_point_size(event_loop));
+        window_settings.clamp_position_to_monitors(event_loop);
+
+        window_builder = window_settings.initialize_window_builder(window_builder);
         window_settings.inner_size_points()
     } else {
         if let Some(pos) = *initial_window_pos {
@@ -157,6 +166,7 @@ pub fn window_builder<E>(
         *initial_window_size
     };
 
+    #[cfg(not(target_os = "ios"))]
     if *centered {
         if let Some(monitor) = event_loop.available_monitors().next() {
             let monitor_size = monitor.size().to_logical::<f64>(monitor.scale_factor());
@@ -168,19 +178,29 @@ pub fn window_builder<E>(
             }
         }
     }
-    window_builder
+
+    match std::mem::take(&mut native_options.window_builder) {
+        Some(hook) => hook(window_builder),
+        None => window_builder,
+    }
 }
 
 pub fn apply_native_options_to_window(
     window: &winit::window::Window,
     native_options: &crate::NativeOptions,
+    window_settings: Option<WindowSettings>,
 ) {
+    crate::profile_function!();
     use winit::window::WindowLevel;
     window.set_window_level(if native_options.always_on_top {
         WindowLevel::AlwaysOnTop
     } else {
         WindowLevel::Normal
     });
+
+    if let Some(window_settings) = window_settings {
+        window_settings.initialize_window(window);
+    }
 }
 
 fn largest_monitor_point_size<E>(event_loop: &EventLoopWindowTarget<E>) -> egui::Vec2 {
@@ -315,7 +335,7 @@ pub fn handle_app_output(
 /// For loading/saving app state and/or egui memory to disk.
 pub fn create_storage(_app_name: &str) -> Option<Box<dyn epi::Storage>> {
     #[cfg(feature = "persistence")]
-    if let Some(storage) = super::file_storage::FileStorage::from_app_name(_app_name) {
+    if let Some(storage) = super::file_storage::FileStorage::from_app_id(_app_name) {
         return Some(Box::new(storage));
     }
     None
@@ -330,11 +350,15 @@ pub struct EpiIntegration {
     pub egui_ctx: egui::Context,
     pending_full_output: egui::FullOutput,
     egui_winit: egui_winit::State,
+
     /// When set, it is time to close the native window.
     close: bool,
+
     can_drag_window: bool,
     window_state: WindowState,
     follow_system_theme: bool,
+    #[cfg(feature = "persistence")]
+    persist_window: bool,
     app_icon_setter: super::app_icon::AppTitleIconSetter,
 }
 
@@ -380,6 +404,8 @@ impl EpiIntegration {
             #[cfg(feature = "wgpu")]
             wgpu_render_state,
             screenshot: std::cell::Cell::new(None),
+            raw_display_handle: window.raw_display_handle(),
+            raw_window_handle: window.raw_window_handle(),
         };
 
         let mut egui_winit = egui_winit::State::new(event_loop);
@@ -401,6 +427,8 @@ impl EpiIntegration {
             can_drag_window: false,
             window_state,
             follow_system_theme: native_options.follow_system_theme,
+            #[cfg(feature = "persistence")]
+            persist_window: native_options.persist_window,
             app_icon_setter,
         }
     }
@@ -445,6 +473,8 @@ impl EpiIntegration {
         app: &mut dyn epi::App,
         event: &winit::event::WindowEvent<'_>,
     ) -> EventResponse {
+        crate::profile_function!();
+
         use winit::event::{ElementState, MouseButton, WindowEvent};
 
         match event {
@@ -558,24 +588,26 @@ impl EpiIntegration {
     pub fn maybe_autosave(&mut self, app: &mut dyn epi::App, window: &winit::window::Window) {
         let now = std::time::Instant::now();
         if now - self.last_auto_save > app.auto_save_interval() {
-            self.save(app, window);
+            self.save(app, Some(window));
             self.last_auto_save = now;
         }
     }
 
     #[allow(clippy::unused_self)]
-    pub fn save(&mut self, _app: &mut dyn epi::App, _window: &winit::window::Window) {
+    pub fn save(&mut self, _app: &mut dyn epi::App, _window: Option<&winit::window::Window>) {
         #[cfg(feature = "persistence")]
         if let Some(storage) = self.frame.storage_mut() {
             crate::profile_function!();
 
-            if _app.persist_native_window() {
-                crate::profile_scope!("native_window");
-                epi::set_value(
-                    storage,
-                    STORAGE_WINDOW_KEY,
-                    &WindowSettings::from_display(_window),
-                );
+            if let Some(window) = _window {
+                if self.persist_window {
+                    crate::profile_scope!("native_window");
+                    epi::set_value(
+                        storage,
+                        STORAGE_WINDOW_KEY,
+                        &WindowSettings::from_display(window),
+                    );
+                }
             }
             if _app.persist_egui_memory() {
                 crate::profile_scope!("egui_memory");
@@ -600,6 +632,7 @@ const STORAGE_EGUI_MEMORY_KEY: &str = "egui";
 const STORAGE_WINDOW_KEY: &str = "window";
 
 pub fn load_window_settings(_storage: Option<&dyn epi::Storage>) -> Option<WindowSettings> {
+    crate::profile_function!();
     #[cfg(feature = "persistence")]
     {
         epi::get_value(_storage?, STORAGE_WINDOW_KEY)
@@ -609,6 +642,7 @@ pub fn load_window_settings(_storage: Option<&dyn epi::Storage>) -> Option<Windo
 }
 
 pub fn load_egui_memory(_storage: Option<&dyn epi::Storage>) -> Option<egui::Memory> {
+    crate::profile_function!();
     #[cfg(feature = "persistence")]
     {
         epi::get_value(_storage?, STORAGE_EGUI_MEMORY_KEY)
